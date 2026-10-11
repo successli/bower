@@ -23,6 +23,12 @@ xcodegen generate          # regenerates Bower.xcodeproj from project.yml
 open Bower.xcodeproj
 ```
 
+## Local customization
+
+This fork adds a bottom mini player while browsing (position, size, and
+pause-on-leave are configurable in Settings ▸ Playback) and routes YouTube
+video links to the in-app player instead of the browser.
+
 ## Layout
 
 - `App/` — entry point, menu commands, `AppModel` (selection, sheets, import/export)

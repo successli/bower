@@ -218,7 +218,7 @@ struct VideoContextMenu: View {
             Button("Hide from Playback") { app.playback.hide(video) }
         }
         Divider()
-        Button("Open in YouTube") { NSWorkspace.shared.open(video.watchURL) }
+        Button("Open Video") { app.openLink(video.watchURL) }
         Button("Copy Link") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(video.watchURL.absoluteString, forType: .string)

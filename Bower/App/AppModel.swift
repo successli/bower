@@ -18,7 +18,7 @@ final class AppModel {
         didSet {
             guard selection != oldValue else { return }
             reloadDisplayed()
-            isPlayerVisible = false
+            hidePlayer()
             filter = ""
         }
     }
@@ -52,6 +52,8 @@ final class AppModel {
         self.store = store
         playback = PlaybackModel(store: store)
         library = LibraryService(store: store)
+        // Every link the player surfaces goes through one router.
+        playback.player.onOpenLink = { [weak self] url in self?.openLink(url) }
         reloadDisplayed()
         Task { await CookieStore.shared.syncToWebKit(clearExisting: false) }
     }
@@ -124,6 +126,16 @@ final class AppModel {
         isPlayerVisible = true
     }
 
+    /// Leaves the player page, pausing first when the user set that
+    /// (Settings ▸ Playback). The one door for the Back button and
+    /// sidebar changes alike. Read live so Settings edits apply at once.
+    func hidePlayer() {
+        if UserDefaults.standard.object(forKey: "pauseWhenLeavingPlayer") as? Bool ?? false {
+            playback.player.pause()
+        }
+        isPlayerVisible = false
+    }
+
     /// Shows `selection` with one of its videos cued, as when picking a
     /// search result.
     func reveal(_ videoID: String, in selection: LibrarySelection) {
@@ -131,6 +143,55 @@ final class AppModel {
         if let video = displayedVideos.first(where: { $0.id == videoID }) {
             playback.play(video, from: displayedVideos, context: selection, autoplay: false)
             isPlayerVisible = true
+        }
+    }
+
+    // MARK: Link routing
+
+    /// Bumped on every routed link, so a slow metadata fetch for an earlier
+    /// click can't decide what plays after a newer one.
+    @ObservationIgnored private var linkRequest = 0
+
+    /// Where a clicked link goes: YouTube video links play in the app,
+    /// everything else (channels, playlists, other sites) opens in the browser.
+    func openLink(_ url: URL) {
+        linkRequest += 1
+        let request = linkRequest
+        guard let link = YouTubeURL.videoLink(url) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        // The video already playing: bring it into view (and jump to the
+        // link's time, if any) rather than loading it again.
+        if playback.current?.id == link.id {
+            showPlayer()
+            if let start = link.start { playback.seek(to: start) }
+            return
+        }
+
+        // A video in the list being shown plays from there, keeping its queue.
+        if let selection, let video = displayedVideos.first(where: { $0.id == link.id }) {
+            playback.play(video, from: displayedVideos, context: selection, startAt: link.start)
+            isPlayerVisible = true
+            return
+        }
+
+        // Not in the library (a video from an unsubscribed channel, say):
+        // ask YouTube what it is, then play it on its own. Only this click's
+        // request may act, and only if nothing else started playing since.
+        let context = selection ?? .latest
+        let preceding = playback.current?.id
+        Task {
+            do {
+                let details = try await InnerTubeClient.shared.video(id: link.id)
+                guard request == linkRequest, playback.current?.id == preceding else { return }
+                playback.play(details.video, from: [details.video], context: context, startAt: link.start)
+                isPlayerVisible = true
+            } catch {
+                guard request == linkRequest, playback.current?.id == preceding else { return }
+                alertMessage = "Couldn't open that video: \(error.localizedDescription)"
+            }
         }
     }
 

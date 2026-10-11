@@ -42,8 +42,9 @@ final class PlaybackModel {
 
     // MARK: Starting playback
 
-    /// Plays `video`, making `list` the queue.
-    func play(_ video: Video, from list: [Video], context: LibrarySelection, autoplay: Bool = true) {
+    /// Plays `video`, making `list` the queue. `startAt` — a clicked link's
+    /// time — overrides the saved resume position.
+    func play(_ video: Video, from list: [Video], context: LibrarySelection, autoplay: Bool = true, startAt: Double? = nil) {
         let contextChanged = queueContext != context
         queue = list
         queueContext = context
@@ -51,7 +52,7 @@ final class PlaybackModel {
             current = video
             rebuildShuffleOrder()
         }
-        start(video, autoplay: autoplay)
+        start(video, autoplay: autoplay, startAt: startAt)
     }
 
     /// Keeps the queue in step when the library behind it changes.
@@ -67,8 +68,8 @@ final class PlaybackModel {
         }
     }
 
-    private func start(_ video: Video, autoplay: Bool) {
-        let resume = positions.position(for: video.id)
+    private func start(_ video: Video, autoplay: Bool, startAt: Double? = nil) {
+        let resume = startAt ?? positions.position(for: video.id)
         current = video
         player.load(videoID: video.id, startAt: resume, autoplay: autoplay)
         inspect(video.id, autoplay: autoplay)

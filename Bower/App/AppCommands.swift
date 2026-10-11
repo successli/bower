@@ -77,8 +77,8 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("d")
             .disabled(playback.current == nil)
-            Button("Open in YouTube") {
-                if let video = playback.current { NSWorkspace.shared.open(video.watchURL) }
+            Button("Open Video") {
+                if let video = playback.current { model.openLink(video.watchURL) }
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
             .disabled(playback.current == nil)

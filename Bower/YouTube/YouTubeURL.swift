@@ -1,12 +1,21 @@
 import Foundation
 
-/// Classifies what the user pasted into the Add sheet.
+/// Two readings of YouTube URLs: what the user pasted into the Add sheet
+/// (`classify`) and what a clicked link names (`videoLink`), which plays in
+/// the app instead of opening the browser.
 nonisolated enum YouTubeURL {
     enum Kind: Equatable {
         case playlist(id: String)
         case channel
         case video(id: String)
         case unsupported(String)
+    }
+
+    /// A clicked link that names one playable video.
+    struct VideoLink: Equatable {
+        var id: String
+        /// Seconds from a `t`/`start` parameter, when the link has one.
+        var start: Double?
     }
 
     // Single-segment paths under youtube.com that are pages, not legacy
@@ -77,6 +86,49 @@ nonisolated enum YouTubeURL {
         if ["channel", "c", "user"].contains(first) { return parts.count >= 2 }
         if first.hasPrefix("@") { return true }
         return parts.count == 1 && !reservedPaths.contains(first.lowercased())
+    }
+
+    // MARK: Clicked links
+
+    /// Parses a URL the user clicked into the video it names, so it can play
+    /// in the app. Unlike `classify` (the Add sheet, where the playlist
+    /// wins), the video wins even when a `list` is on the same URL, and
+    /// shorts, live, and embed pages name playable videos too. Anything
+    /// else — other YouTube pages (channels, playlists, search), other
+    /// sites, anything not http(s) — returns nil and stays in the browser.
+    static func videoLink(_ url: URL) -> VideoLink? {
+        let scheme = url.scheme?.lowercased()
+        guard scheme == "http" || scheme == "https", isYouTubeHost(url),
+              let id = clickedVideoID(url), isVideoID(id) else { return nil }
+        return VideoLink(id: id, start: startTime(url))
+    }
+
+    private static func clickedVideoID(_ url: URL) -> String? {
+        let parts = segments(url)
+        if url.host()?.lowercased().hasSuffix("youtu.be") == true { return parts.first }
+        let first = parts.first?.lowercased() ?? ""
+        if first == "watch", parts.count == 1 { return query(url, "v") }
+        if ["shorts", "live", "embed", "v"].contains(first), parts.count >= 2 { return parts[1] }
+        return nil
+    }
+
+    /// Video IDs are exactly 11 characters of ASCII letters, digits, `-`, `_`.
+    private static func isVideoID(_ id: String) -> Bool {
+        id.count == 11 && id.unicodeScalars.allSatisfy { videoIDCharacters.contains($0) }
+    }
+
+    private static let videoIDCharacters = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+    /// `t=90`, `t=90s`, `t=1m30s`, `t=1h2m3s` — or `start=`, which embeds use.
+    private static func startTime(_ url: URL) -> Double? {
+        guard let raw = (query(url, "t") ?? query(url, "start"))?.lowercased() else { return nil }
+        if let seconds = Double(raw) { return max(seconds, 0) }
+        guard let match = raw.firstMatch(of: /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/) else { return nil }
+        let seconds = (Double(match.1 ?? "0") ?? 0) * 3600
+            + (Double(match.2 ?? "0") ?? 0) * 60
+            + (Double(match.3 ?? "0") ?? 0)
+        return seconds > 0 ? seconds : nil
     }
 
     /// The `UC…` id when the URL names it directly, so no lookup is needed.

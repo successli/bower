@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// A video description with clickable timestamps (seek the player) and links
-/// (open in the browser), selectable for copying.
+/// (routed through the app), selectable for copying.
 ///
 /// Backed by an NSTextView rather than `Text` + `.textSelection`: selectable
 /// SwiftUI text reports a minimum size that follows its width, and inside a
@@ -11,6 +11,7 @@ import SwiftUI
 struct DescriptionText: NSViewRepresentable {
     let text: String
     let onSeek: (Int) -> Void
+    let onLink: (URL) -> Void
 
     private static let seekScheme = "bower-seek"
     // 0:08, 35:18, 1:09:54 — but not parts of "1.2.7" or "v1:2".
@@ -40,6 +41,7 @@ struct DescriptionText: NSViewRepresentable {
 
     func updateNSView(_ textView: NSTextView, context: Context) {
         context.coordinator.onSeek = onSeek
+        context.coordinator.onLink = onLink
         if context.coordinator.text != text {
             context.coordinator.text = text
             let attributed = Self.attributed(text)
@@ -65,10 +67,14 @@ struct DescriptionText: NSViewRepresentable {
             .paragraphStyle: paragraph,
         ])
         let range = NSRange(location: 0, length: (text as NSString).length)
-        for match in links.matches(in: text, range: range) {
+        let linkMatches = links.matches(in: text, range: range)
+        for match in linkMatches {
             if let url = match.url { result.addAttribute(.link, value: url, range: match.range) }
         }
         for match in timestamp.matches(in: text, range: range) {
+            // A time-shaped fragment inside a URL ("…/live/1:23") belongs to
+            // the link, not a timestamp to seek.
+            if linkMatches.contains(where: { $0.url != nil && NSIntersectionRange($0.range, match.range).length > 0 }) { continue }
             let value = (text as NSString).substring(with: match.range)
             if let seconds = DurationText.seconds(from: value),
                let url = URL(string: "\(seekScheme)://\(seconds)") {
@@ -81,6 +87,7 @@ struct DescriptionText: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: String?
         var onSeek: (Int) -> Void = { _ in }
+        var onLink: (URL) -> Void = { _ in }
 
         // Measured on a separate text stack: SwiftUI probes several widths
         // and doesn't always resize the view after the last one, so sizing
@@ -107,7 +114,7 @@ struct DescriptionText: NSViewRepresentable {
             if url.scheme == DescriptionText.seekScheme, let seconds = Int(url.host() ?? "") {
                 onSeek(seconds)
             } else {
-                NSWorkspace.shared.open(url)
+                onLink(url)
             }
             return true
         }

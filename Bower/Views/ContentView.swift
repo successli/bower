@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.controlActiveState) private var activeState
     @AppStorage("alwaysOnTop") private var alwaysOnTop = false
+    @AppStorage("miniPlayerPosition") private var miniPlayerPosition: MiniPlayerPosition = .top
 
     var body: some View {
         @Bindable var app = app
@@ -22,13 +23,23 @@ struct ContentView: View {
                     .accessibilityHidden(!app.isPlayerVisible)
                 if !app.isPlayerVisible {
                     VideoGridView()
+                        // safeAreaInset gives the bar its own space, so the
+                        // grid scrolls clear of it instead of underneath.
+                        .safeAreaInset(edge: miniPlayerPosition.edge, spacing: 0) {
+                            if app.playback.current != nil {
+                                MiniPlayerBar()
+                                    .padding(.horizontal, 16)
+                                    .padding(miniPlayerPosition == .top ? .top : .bottom, 12)
+                                    .transition(.move(edge: miniPlayerPosition.moveEdge).combined(with: .opacity))
+                            }
+                        }
                 }
             }
             .toolbar {
                 if app.isPlayerVisible {
                     ToolbarItem(placement: .navigation) {
                         Button {
-                            withAnimation(.snappy(duration: 0.25)) { app.isPlayerVisible = false }
+                            withAnimation(.snappy(duration: 0.25)) { app.hidePlayer() }
                         } label: {
                             Label("Back", systemImage: "chevron.left")
                         }
@@ -123,6 +134,114 @@ struct ContentView: View {
     private var refreshFailureTitle: String {
         let count = app.library.failures.count
         return "Couldn't update \(count) \(count == 1 ? "source" : "sources")"
+    }
+}
+
+/// Where the mini player bar floats over the grid. A setting
+/// (Settings ▸ Playback); the raw values persist in UserDefaults.
+enum MiniPlayerPosition: String, CaseIterable, Identifiable {
+    case top, bottom
+    var id: String { rawValue }
+    var title: String { self == .top ? "Top" : "Bottom" }
+    var edge: VerticalEdge { self == .top ? .top : .bottom }
+    var moveEdge: Edge { self == .top ? .top : .bottom }
+}
+
+/// The bar's scale. A setting too.
+enum MiniPlayerSize: String, CaseIterable, Identifiable {
+    case small, regular, large
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .small: "Small"
+        case .regular: "Regular"
+        case .large: "Large"
+        }
+    }
+    var scale: CGFloat {
+        switch self {
+        case .small: 0.85
+        case .regular: 1
+        case .large: 1.15
+        }
+    }
+    var barHeight: CGFloat { 48 * scale }
+    var thumbnailSize: CGSize { CGSize(width: 64 * scale, height: 36 * scale) }
+    var controlSize: CGFloat { 32 * scale }
+}
+
+/// The floating bar for a video that keeps playing after leaving the
+/// player. Thumbnail and title open the player; transport stays at hand.
+private struct MiniPlayerBar: View {
+    @Environment(AppModel.self) private var app
+    @AppStorage("miniPlayerSize") private var size: MiniPlayerSize = .regular
+    @AppStorage("miniPlayerPosition") private var position: MiniPlayerPosition = .top
+
+    var body: some View {
+        let playback = app.playback
+        HStack(spacing: 8) {
+            Button {
+                app.showPlayer()
+            } label: {
+                HStack(spacing: 10) {
+                    RemoteImage(url: playback.current?.thumbnail)
+                        .frame(width: size.thumbnailSize.width, height: size.thumbnailSize.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(playback.current?.title ?? "")
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                        Text(progressText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show Now Playing")
+
+            Button {
+                playback.togglePlayPause()
+            } label: {
+                Image(systemName: playback.player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: size.controlSize, height: size.controlSize)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playback.player.isPlaying ? "Pause" : "Play")
+            .help(playback.player.isPlaying ? "Pause" : "Play")
+
+            Button {
+                app.showPlayer()
+            } label: {
+                // Points toward the content the bar sits against.
+                Image(systemName: position == .top ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: size.controlSize, height: size.controlSize)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show Now Playing")
+            .help("Show Now Playing")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(height: size.barHeight)
+        .frame(maxWidth: 560)
+        .glassEffect(.regular.interactive(), in: .capsule)
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
+    }
+
+    private var progressText: String {
+        let player = app.playback.player
+        let elapsed = DurationText.format(seconds: Int(player.currentTime))
+        return player.duration > 1
+            ? "\(elapsed) / \(DurationText.format(seconds: Int(player.duration)))"
+            : elapsed
     }
 }
 

@@ -80,7 +80,7 @@ private struct VideoHeader: View {
 
         VStack(alignment: .leading, spacing: 10) {
             Button {
-                NSWorkspace.shared.open(video.watchURL)
+                app.openLink(video.watchURL)
             } label: {
                 Text(video.title)
                     .font(.title2.weight(.semibold))
@@ -89,7 +89,7 @@ private struct VideoHeader: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-            .help("Open in YouTube")
+            .help("Open Video")
 
             HStack(spacing: 6) {
                 let details = [video.sourceTitle, RelativeTime.format(video.publishedDate).nilIfEmpty, video.duration]
@@ -152,9 +152,9 @@ private struct VideoHeader: View {
                 }
 
                 Button {
-                    NSWorkspace.shared.open(video.watchURL)
+                    app.openLink(video.watchURL)
                 } label: {
-                    Label("Open in YouTube", systemImage: "safari")
+                    Label("Open Video", systemImage: "play.rectangle")
                 }
             }
             .labelStyle(.iconOnly)
@@ -190,9 +190,11 @@ private struct DescriptionSection: View {
                 Text("No description available")
                     .foregroundStyle(.tertiary)
             } else {
-                DescriptionText(text: playback.descriptionText) { seconds in
+                DescriptionText(text: playback.descriptionText, onSeek: { seconds in
                     playback.seek(to: Double(seconds))
-                }
+                }, onLink: { url in
+                    app.openLink(url)
+                })
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -21,6 +21,8 @@ final class YouTubePlayer: NSObject {
     @ObservationIgnored var onEnded: (() -> Void)?
     @ObservationIgnored var onStartedPlaying: (() -> Void)?
     @ObservationIgnored var onProgress: ((Double, Double) -> Void)?
+    /// Where every link the player surfaces goes (video chrome, new windows).
+    @ObservationIgnored var onOpenLink: ((URL) -> Void)?
 
     @ObservationIgnored private var pendingLoad: (id: String, start: Double, autoplay: Bool)?
     @ObservationIgnored private var currentVideoID: String?
@@ -224,12 +226,15 @@ final class YouTubePlayer: NSObject {
 
 extension YouTubePlayer: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-        // Links inside the player (title, channel, logo) open in the browser
-        // rather than replacing the player page.
+        // Links inside the player (title, channel, logo) go through the app's
+        // link routing — a video link plays here, anything else opens in the
+        // browser — rather than replacing the player page. Anything that
+        // isn't a clicked main-frame link (the iframe itself, its scripts)
+        // loads as before.
         if navigationAction.targetFrame?.isMainFrame != false,
            navigationAction.navigationType == .linkActivated,
            let url = navigationAction.request.url {
-            NSWorkspace.shared.open(url)
+            onOpenLink?(url)
             return .cancel
         }
         return .allow
@@ -237,7 +242,9 @@ extension YouTubePlayer: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url { NSWorkspace.shared.open(url) }
+        // The same routing for target="_blank" links; a click reaches either
+        // this or decidePolicyFor, never both.
+        if let url = navigationAction.request.url { onOpenLink?(url) }
         return nil
     }
 
