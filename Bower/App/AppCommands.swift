@@ -25,7 +25,7 @@ struct AppCommands: Commands {
 
         CommandGroup(after: .sidebar) {
             Button(model.showVideoList ? "Hide Video List" : "Show Video List") {
-                model.showVideoList.toggle()
+                model.toggleVideoList()
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
         }

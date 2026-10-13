@@ -5,7 +5,6 @@ struct ContentView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.controlActiveState) private var activeState
     @AppStorage("alwaysOnTop") private var alwaysOnTop = false
-    @AppStorage("miniPlayerPosition") private var miniPlayerPosition: MiniPlayerPosition = .top
 
     var body: some View {
         @Bindable var app = app
@@ -23,39 +22,40 @@ struct ContentView: View {
                     .accessibilityHidden(!app.isPlayerVisible)
                 if !app.isPlayerVisible {
                     VideoGridView()
-                        // safeAreaInset gives the bar its own space, so the
-                        // grid scrolls clear of it instead of underneath.
-                        .safeAreaInset(edge: miniPlayerPosition.edge, spacing: 0) {
-                            if app.playback.current != nil {
-                                MiniPlayerBar()
-                                    .padding(.horizontal, 16)
-                                    .padding(miniPlayerPosition == .top ? .top : .bottom, 12)
-                                    .transition(.move(edge: miniPlayerPosition.moveEdge).combined(with: .opacity))
-                            }
-                        }
                 }
             }
             .toolbar {
                 if app.isPlayerVisible {
                     ToolbarItem(placement: .navigation) {
                         Button {
-                            withAnimation(.snappy(duration: 0.25)) { app.hidePlayer() }
+                            app.leavePlayer()
                         } label: {
                             Label("Back", systemImage: "chevron.left")
                         }
                         .help("Back to \(app.displayedTitle)")
                         .keyboardShortcut("[", modifiers: .command)
                     }
+                } else if app.playback.current != nil {
+                    // The bar sits in the toolbar — the top of the window —
+                    // where it can never push the grid around.
+                    ToolbarItem(placement: .principal) {
+                        MiniPlayerBar()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                 }
             }
         }
         // On the split view rather than the detail column, so the list is
         // always a full-height trailing column; on the detail column it came
         // back under a window-wide toolbar after being toggled.
-        .inspector(isPresented: Binding(get: { app.isPlayerVisible && app.showVideoList },
-                                        // Leaving the player dismisses the inspector too;
-                                        // that must not count as the user hiding the list.
-                                        set: { if app.isPlayerVisible { app.showVideoList = $0 } })) {
+        .inspector(isPresented: Binding(get: { app.isVideoListOpen },
+                                        // Only the user closing the panel lands in the
+                                        // setter; the closes that follow the player out
+                                        // must not count as hiding the list for next time.
+                                        set: {
+                                            app.isVideoListOpen = $0
+                                            if app.isPlayerVisible { app.showVideoList = $0 }
+                                        })) {
             VideoListView()
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 560)
                 .background(InspectorHeaderAnchor())
@@ -101,22 +101,16 @@ struct ContentView: View {
     }
 
     // One persistent group stays at the trailing edge as the inspector toggles.
+    // The mini player bar replaces the old Now Playing entry point.
     private var toolbarControls: some View {
         HStack(spacing: 2) {
-            if !app.isPlayerVisible, app.playback.current != nil {
-                toolbarButton("Now Playing",
-                              systemImage: app.playback.player.isPlaying ? "waveform" : "play.rectangle",
-                              help: "Show Now Playing") {
-                    withAnimation(.snappy(duration: 0.25)) { app.showPlayer() }
-                }
-            }
             toolbarButton("Search", systemImage: "magnifyingglass", help: "Search Videos (⌘K)") {
                 app.activeSheet = .search
             }
             if app.isPlayerVisible {
                 toolbarButton("Video List", systemImage: "sidebar.trailing",
                               help: app.showVideoList ? "Hide Video List" : "Show Video List") {
-                    app.showVideoList.toggle()
+                    app.toggleVideoList()
                 }
             }
         }
@@ -144,17 +138,8 @@ struct ContentView: View {
     }
 }
 
-/// Where the mini player bar floats over the grid. A setting
-/// (Settings ▸ Playback); the raw values persist in UserDefaults.
-enum MiniPlayerPosition: String, CaseIterable, Identifiable {
-    case top, bottom
-    var id: String { rawValue }
-    var title: String { self == .top ? "Top" : "Bottom" }
-    var edge: VerticalEdge { self == .top ? .top : .bottom }
-    var moveEdge: Edge { self == .top ? .top : .bottom }
-}
-
-/// The bar's scale. A setting too.
+/// The bar's scale in the toolbar. A setting (Settings ▸ Playback); the
+/// raw values persist in UserDefaults.
 enum MiniPlayerSize: String, CaseIterable, Identifiable {
     case small, regular, large
     var id: String { rawValue }
@@ -172,23 +157,23 @@ enum MiniPlayerSize: String, CaseIterable, Identifiable {
         case .large: 1.15
         }
     }
-    var barHeight: CGFloat { 48 * scale }
-    var thumbnailSize: CGSize { CGSize(width: 64 * scale, height: 36 * scale) }
-    var controlSize: CGFloat { 32 * scale }
+    var barHeight: CGFloat { 36 * scale }
+    var thumbnailSize: CGSize { CGSize(width: 48 * scale, height: 27 * scale) }
+    var controlSize: CGFloat { 26 * scale }
 }
 
-/// The floating bar for a video that keeps playing after leaving the
-/// player. Thumbnail and title open the player; transport stays at hand.
+/// The toolbar bar for a video that keeps playing after leaving the
+/// player. It sits at the top of the window, clear of the grid; the
+/// thumbnail and title open the player, transport stays at hand.
 private struct MiniPlayerBar: View {
     @Environment(AppModel.self) private var app
     @AppStorage("miniPlayerSize") private var size: MiniPlayerSize = .regular
-    @AppStorage("miniPlayerPosition") private var position: MiniPlayerPosition = .top
 
     var body: some View {
         let playback = app.playback
         HStack(spacing: 8) {
             Button {
-                app.showPlayer()
+                app.openPlayer()
             } label: {
                 HStack(spacing: 10) {
                     RemoteImage(url: playback.current?.thumbnail)
@@ -214,7 +199,7 @@ private struct MiniPlayerBar: View {
                 playback.togglePlayPause()
             } label: {
                 Image(systemName: playback.player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .frame(width: size.controlSize, height: size.controlSize)
                     .contentShape(Circle())
             }
@@ -223,11 +208,11 @@ private struct MiniPlayerBar: View {
             .help(playback.player.isPlaying ? "Pause" : "Play")
 
             Button {
-                app.showPlayer()
+                app.openPlayer()
             } label: {
-                // Points toward the content the bar sits against.
-                Image(systemName: position == .top ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 13, weight: .semibold))
+                // Points down at the grid the bar sits above.
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
                     .frame(width: size.controlSize, height: size.controlSize)
                     .contentShape(Circle())
             }
@@ -238,9 +223,8 @@ private struct MiniPlayerBar: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: size.barHeight)
-        .frame(maxWidth: 560)
+        .frame(maxWidth: 480)
         .glassEffect(.regular.interactive(), in: .capsule)
-        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
     }
 
     private var progressText: String {

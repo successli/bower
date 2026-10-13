@@ -401,9 +401,9 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @AppStorage("theme") private var theme: Theme = .system
     @AppStorage("alwaysOnTop") private var alwaysOnTop = false
-    @AppStorage("miniPlayerPosition") private var miniPlayerPosition: MiniPlayerPosition = .top
     @AppStorage("miniPlayerSize") private var miniPlayerSize: MiniPlayerSize = .regular
-    @AppStorage("pauseWhenLeavingPlayer") private var pauseWhenLeavingPlayer = false
+    @AppStorage("pauseWhenLeavingPlayer") private var pauseWhenLeavingPlayer = true
+    @AppStorage("resumeWhenReturningToPlayer") private var resumeWhenReturningToPlayer = true
 
     var body: some View {
         Form {
@@ -416,15 +416,12 @@ struct SettingsView: View {
             }
 
             Section("Playback") {
-                Picker("Mini Player Position", selection: $miniPlayerPosition) {
-                    ForEach(MiniPlayerPosition.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
                 Picker("Mini Player Size", selection: $miniPlayerSize) {
                     ForEach(MiniPlayerSize.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 Toggle("Pause when leaving the player", isOn: $pauseWhenLeavingPlayer)
+                Toggle("Resume when returning from the mini player", isOn: $resumeWhenReturningToPlayer)
             }
 
             Section("YouTube Account") {
