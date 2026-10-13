@@ -35,7 +35,7 @@ final class AppModel {
     @ObservationIgnored private var haystacks: [String]?
 
     /// The main area shows either the selected list as a grid of videos or,
-    /// once a video is picked, the player with the list alongside it.
+    /// once a video is picked, the player with an optional video list.
     var isPlayerVisible = false
 
     private(set) var displayedVideos: [Video] = []
@@ -107,7 +107,7 @@ final class AppModel {
     func play(_ video: Video) {
         guard let selection else { return }
         playback.play(video, from: displayedVideos, context: selection)
-        isPlayerVisible = true
+        presentPlayer()
     }
 
     /// Plays the visible list from the top (or from a random video when
@@ -123,7 +123,7 @@ final class AppModel {
         if let context = playback.queueContext, context != selection {
             selection = context
         }
-        isPlayerVisible = true
+        presentPlayer()
     }
 
     /// Leaves the player page, pausing first when the user set that
@@ -142,7 +142,7 @@ final class AppModel {
         self.selection = selection
         if let video = displayedVideos.first(where: { $0.id == videoID }) {
             playback.play(video, from: displayedVideos, context: selection, autoplay: false)
-            isPlayerVisible = true
+            presentPlayer()
         }
     }
 
@@ -173,7 +173,7 @@ final class AppModel {
         // A video in the list being shown plays from there, keeping its queue.
         if let selection, let video = displayedVideos.first(where: { $0.id == link.id }) {
             playback.play(video, from: displayedVideos, context: selection, startAt: link.start)
-            isPlayerVisible = true
+            presentPlayer()
             return
         }
 
@@ -187,12 +187,17 @@ final class AppModel {
                 let details = try await InnerTubeClient.shared.video(id: link.id)
                 guard request == linkRequest, playback.current?.id == preceding else { return }
                 playback.play(details.video, from: [details.video], context: context, startAt: link.start)
-                isPlayerVisible = true
+                presentPlayer()
             } catch {
                 guard request == linkRequest, playback.current?.id == preceding else { return }
                 alertMessage = "Couldn't open that video: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func presentPlayer() {
+        if !isPlayerVisible { showVideoList = false }
+        isPlayerVisible = true
     }
 
     func deleteSource(_ ref: SourceRef) {

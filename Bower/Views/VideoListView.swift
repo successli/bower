@@ -1,57 +1,50 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 /// The right-hand list of videos for whatever the sidebar has selected.
 struct VideoListView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.displayScale) private var displayScale
+    @State private var isScrolled = false
 
     var body: some View {
         let videos = app.filteredVideos
         let playingHere = app.playback.queueContext == app.selection
         let currentID = playingHere ? app.playback.current?.id : nil
 
-        // The header moves up into the toolbar band, which is otherwise empty
-        // apart from the toolbar buttons on its trailing side.
-        GeometryReader { geometry in
-        VStack(spacing: 0) {
-            header(count: app.displayedVideos.count, currentID: currentID)
-                .frame(height: max(geometry.safeAreaInsets.top, 44))
-            // A one-pixel hairline, matching the toolbar separator it lines up
-            // with in the main area (Divider is a full point and darker).
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: 1 / displayScale)
-            ScrollViewReader { proxy in
-                List {
-                    ForEach(videos) { video in
-                        VideoRow(video: video, isCurrent: video.id == currentID,
-                                 isPlaying: video.id == currentID && app.playback.player.isPlaying,
-                                 showsSource: showsSource)
-                            .id(video.id)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
-                    }
+        ScrollViewReader { proxy in
+            List {
+                ForEach(videos) { video in
+                    VideoRow(video: video, isCurrent: video.id == currentID,
+                             isPlaying: video.id == currentID && app.playback.player.isPlaying,
+                             showsSource: showsSource)
+                        .id(video.id)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
                 }
-                .listStyle(.plain)
-                .safeAreaPadding(.top, 10)
-                .scrollContentBackground(.hidden)
-                .overlay {
-                    if videos.isEmpty && !app.filter.isEmpty {
-                        ContentUnavailableView.search(text: app.filter)
-                    }
-                }
-                .onChange(of: currentID) { _, id in
-                    guard let id else { return }
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
-                }
-                .onAppear {
-                    if let currentID { proxy.scrollTo(currentID, anchor: .center) }
-                }
-                .safeAreaBar(edge: .bottom) { FilterBar() }
             }
-        }
-        .ignoresSafeArea(.container, edges: .top)
+            .listStyle(.plain)
+            .contentMargins(.top, 10, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .scrollEdgeEffectStyle(isScrolled ? .hard : .automatic, for: .top)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > 0.5
+            } action: { _, isScrolled in
+                self.isScrolled = isScrolled
+            }
+            .overlay {
+                if videos.isEmpty && !app.filter.isEmpty {
+                    ContentUnavailableView.search(text: app.filter)
+                }
+            }
+            .onChange(of: currentID) { _, id in
+                guard let id else { return }
+                withAnimation { proxy.scrollTo(id, anchor: .center) }
+            }
+            .onAppear {
+                if let currentID { proxy.scrollTo(currentID, anchor: .center) }
+            }
+            .safeAreaBar(edge: .bottom) { FilterBar() }
         }
         .onDisappear { app.filter = "" }
     }
@@ -63,28 +56,25 @@ struct VideoListView: View {
         default: true
         }
     }
+}
 
-    private func header(count: Int, currentID: String?) -> some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(app.displayedTitle)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(positionText(count: count, currentID: currentID))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Spacer(minLength: 8)
-            if app.selection == .history {
-                Button("Clear") { app.store.clearHistory() }
-                    .controlSize(.small)
-                    .disabled(app.store.watchHistory.isEmpty)
-            }
+/// The inspector title and playback position, above the toolbar material.
+struct VideoListHeader: View {
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
+        let count = app.displayedVideos.count
+        let currentID = app.playback.queueContext == app.selection ? app.playback.current?.id : nil
+
+        VStack(alignment: .leading, spacing: 1) {
+            Text(app.displayedTitle)
+                .font(.headline)
+                .lineLimit(1)
+            Text(positionText(count: count, currentID: currentID))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
-        .padding(.leading, 14)
-        // Clear of the toolbar's search / video list capsule.
-        .padding(.trailing, 112)
     }
 
     private func positionText(count: Int, currentID: String?) -> String {
@@ -93,6 +83,122 @@ struct VideoListView: View {
             return "\(count) \(noun)"
         }
         return "\(index + 1) of \(count) \(noun)"
+    }
+}
+
+/// Place the title above the inspector material, inside its native split pane,
+/// so it inherits the pane's opening and closing animation.
+struct InspectorHeaderAnchor: NSViewRepresentable {
+    @Environment(AppModel.self) private var app
+
+    private var header: AnyView {
+        AnyView(VideoListHeader()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .environment(app))
+    }
+
+    func makeNSView(context: Context) -> AnchorView {
+        AnchorView(header: header)
+    }
+
+    func updateNSView(_ view: AnchorView, context: Context) {
+        view.header.rootView = header
+        view.updateHeader()
+    }
+
+    static func dismantleNSView(_ view: AnchorView, coordinator: ()) {
+        view.detach()
+    }
+
+    final class AnchorView: NSView {
+        let header: NSHostingView<AnyView>
+        private let overlay = HeaderOverlay()
+        private var ancestors: [ObservedView] = []
+
+        init(header: AnyView) {
+            self.header = NSHostingView(rootView: header)
+            super.init(frame: .zero)
+            self.header.sizingOptions = []
+            self.header.safeAreaRegions = []
+            self.header.sceneBridgingOptions = []
+            overlay.clipsToBounds = true
+            overlay.addSubview(self.header)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            detach()
+            var column: NSView? = self
+            while let view = column, !(view.superview is NSSplitView) {
+                column = view.superview
+            }
+            guard let column, column.superview is NSSplitView else { return }
+            column.addSubview(overlay, positioned: .above, relativeTo: nil)
+            var ancestor: NSView? = self
+            while let view = ancestor {
+                ancestors.append(ObservedView(view))
+                view.postsFrameChangedNotifications = true
+                ancestor = view.superview
+            }
+            NotificationCenter.default.addObserver(self, selector: #selector(frameChanged(_:)),
+                                                   name: NSView.frameDidChangeNotification, object: nil)
+            updateHeader()
+        }
+
+        @objc private func frameChanged(_ notification: Notification) {
+            guard let view = notification.object as? NSView,
+                  ancestors.contains(where: { $0.view === view }) else { return }
+            updateHeader()
+        }
+
+        func updateHeader() {
+            guard let window, let column = overlay.superview,
+                  let frameView = window.contentView?.superview else {
+                overlay.isHidden = true
+                return
+            }
+            let sidebar = column.convert(column.bounds, to: nil)
+            let windowBounds = frameView.convert(frameView.bounds, to: nil)
+            guard sidebar.width > 0, sidebar.maxX >= windowBounds.maxX - 1 else {
+                overlay.isHidden = true
+                return
+            }
+            let top = window.contentLayoutRect.maxY
+            let toolbar = NSRect(x: sidebar.minX, y: top, width: sidebar.width,
+                                 height: max(0, windowBounds.maxY - top))
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let overlayFrame = column.convert(toolbar, from: nil)
+            let headerFrame = NSRect(x: 10, y: 0, width: max(0, sidebar.width - 110), height: toolbar.height)
+            if overlay.frame != overlayFrame { overlay.frame = overlayFrame }
+            if header.frame != headerFrame { header.frame = headerFrame }
+            overlay.isHidden = sidebar.width <= 0 || toolbar.height <= 0
+            CATransaction.commit()
+        }
+
+        func detach() {
+            NotificationCenter.default.removeObserver(self)
+            for ancestor in ancestors {
+                ancestor.view?.postsFrameChangedNotifications = ancestor.wasPosting
+            }
+            ancestors = []
+            overlay.removeFromSuperview()
+        }
+
+        private final class ObservedView {
+            weak var view: NSView?
+            let wasPosting: Bool
+            init(_ view: NSView) {
+                self.view = view
+                wasPosting = view.postsFrameChangedNotifications
+            }
+        }
+
+        private final class HeaderOverlay: NSView {
+            override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        }
     }
 }
 
